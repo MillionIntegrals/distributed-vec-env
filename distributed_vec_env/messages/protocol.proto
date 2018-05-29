@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+
+message MasterRequest {
+    // Requests sent do master from the workers
+    enum MasterCommand {
+        INITIALIZATION = 0;  // Register client at the server
+        FRAME = 1;  // Send frame from client to the server
+        NAME = 2;  // Ask server for the environment name
+    }
+
+    MasterCommand command = 1;
+    int32 client_id = 2;
+
+    oneof payload {
+        InitializationRequest initialization = 3;
+        Frame frame = 4;
+    }
+}
+
+
+// Send space definition together with initialization request
+message InitializationRequest {
+    bytes spaces = 1;
+}
+
+
+// Send frame of observations from the environment
+message Frame {
+    Array observation = 1;
+    double reward = 2;
+    bool done = 3;
+}
+
+
+// Efficient numpy array representation
+message Array {
+    bytes data = 1;
+    repeated int32 shape = 2;
+    string dtype = 3;
+}
+
+
+// Master responses
+message InitializationResponse {
+    int32 environment_id = 2;
+}
+
+
+// Just an empty confirmation
+message ConfirmationResponse {
+}
+
+
+// Send a response with name of the env
+message NameResponse {
+    string name = 1;
+    int32 seed = 2;
+    int32 server_version = 3;
+    int32 client_id = 4;
+}
+
+
+message WorkerMessage {
+    // Commands set from master to workers
+    enum WorkerCommand {
+        STEP = 0;
+        RESET = 1;
+        CLOSE = 2;
+    }
+
+    WorkerCommand command = 1;   // 1 = reset, 2 = reset_task, 3 = close, 4 = step, 5 = get spaces
+    repeated int32 actions = 2;  // action per client
+}
