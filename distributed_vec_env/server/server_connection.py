@@ -38,7 +38,7 @@ class ServerConnection:
 
         # Some internal state
         self.last_client_id_assigned = 0
-        self.connected_clients = 0
+
         self.client_env_map = {}
         self.env_client_map = {}
 
@@ -60,6 +60,11 @@ class ServerConnection:
     def number_of_clients(self):
         """ Number of environments/clients this server supports """
         return self.configuration.number_of_environments
+
+    @property
+    def connected_clients(self):
+        """ Return number of connected clients """
+        return len(self.client_env_map)
 
     ####################################################################################################################
     # Frame buffer management
@@ -214,8 +219,7 @@ class ServerConnection:
 
         if self.connected_clients < self.number_of_clients:
             # Accept new client
-            # TODO(jerry): This is a heuristic just for a short time
-            new_environment_id = request.client_id
+            new_environment_id = self._map_new_env(request.client_id)
 
             response = pb.MasterResponse(
                 response=pb.MasterResponse.OK,
@@ -228,13 +232,22 @@ class ServerConnection:
 
             self.client_env_map[request.client_id] = new_environment_id
             self.env_client_map[new_environment_id] = request.client_id
-            self.connected_clients += 1
 
             self.request_socket.send(response.SerializeToString())
         else:
             # Too many clients connected, ignore for now
             response = pb.MasterResponse(reponse=pb.MasterResponse.WAIT)
             self.request_socket.send(response.SerializeToString())
+
+    def _map_new_env(self, client_id):
+        """ Map client to a free environment slot """
+        for i in range(self.number_of_clients):
+            if i not in self.env_client_map:
+                self.env_client_map[i] = client_id
+                self.client_env_map[client_id] = i
+                return i
+
+        return None
 
     def _handle_frame_request(self, request):
         """ Handle the FRAME request from the client """
@@ -264,4 +277,3 @@ class ServerConnection:
         """ Send a command to all the clients """
         self.command_nonce = command.nonce
         self.command_socket.send(command.SerializeToString())
-
