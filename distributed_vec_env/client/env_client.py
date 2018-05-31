@@ -36,7 +36,8 @@ class EnvClient(ClientBase):
 
     def close_env(self):
         """ Close the environment and free the resources """
-        self.environment.close()
+        if self.environment is not None:
+            self.environment.close()
 
     def reset_env(self):
         """ Reset the environment and return next frame as Frame protocol buffer """

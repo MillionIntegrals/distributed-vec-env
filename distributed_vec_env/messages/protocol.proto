@@ -42,21 +42,25 @@ message Array {
     string dtype = 3;
 }
 
+message MasterResponse {
+    enum ConfirmationResponseEnum {
+        OK = 0;
+        ERROR = 1;
+        WAIT = 2;
+    }
+
+    ConfirmationResponseEnum response = 1;
+
+    oneof payload {
+        ConnectResponse connect_response = 2;
+        NameResponse name_response = 3;
+    }
+}
+
 
 // Master responses
 message ConnectResponse {
     int32 environment_id = 2;
-}
-
-
-// Just an empty confirmation
-message ConfirmationResponse {
-    enum ConfirmationResponseEnum {
-        OK = 0;
-        ERROR = 1;
-    }
-
-    ConfirmationResponseEnum response = 1;
 }
 
 
