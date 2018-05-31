@@ -23,7 +23,8 @@ def main():
         command_port=9991,
         request_port=9992,
         server_version=1,
-        timeout=10
+        timeout=10,
+        wait_period=1
     )
 
     client = DeepMindEnv(configuration)

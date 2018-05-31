@@ -2,6 +2,7 @@ import logging
 import numpy as np
 import pickle
 import zmq
+import time
 
 import distributed_vec_env.messages.protocol_pb2 as pb
 import distributed_vec_env.numpy_util as numpy_util
@@ -30,29 +31,36 @@ class ServerConnection:
 
         # Pull socket - workers send work results over this channel
         self.request_socket = self.context.socket(zmq.REP)
+        self.request_socket.setsockopt(zmq.LINGER, self.configuration.linger_period * 1000)
         self.request_socket.bind("{}:{}".format(self.configuration.server_url, self.configuration.request_port))
+
+        self.request_poller = zmq.Poller()
+        self.request_poller.register(self.request_socket, zmq.POLLIN)
 
         # Push socket - send commands to workers over this channel
         self.command_socket = self.context.socket(zmq.PUB)
+        self.command_socket.setsockopt(zmq.LINGER, self.configuration.linger_period * 1000)
         self.command_socket.bind("{}:{}".format(self.configuration.server_url, self.configuration.command_port))
 
         # Some internal state
         self.last_client_id_assigned = 0
 
-        self.client_env_map = {}
-        self.env_client_map = {}
-
-        self.observation_buffer = [None for _ in range(self.number_of_clients)]
-        self.reward_buffer = [None for _ in range(self.number_of_clients)]
-        self.done_buffer = [None for _ in range(self.number_of_clients)]
-
         self.observation_space = None
         self.action_space = None
 
         self.is_closed = False
-
         self.instance_id = numpy_util.random_int64()
+
+        self.client_env_map = {}
+        self.env_client_map = {}
+
+        self.prev_observation_buffer = [None for _ in range(self.number_of_clients)]
+        self.observation_buffer = [None for _ in range(self.number_of_clients)]
+        self.reward_buffer = [None for _ in range(self.number_of_clients)]
+        self.done_buffer = [None for _ in range(self.number_of_clients)]
+
         self.command_nonce = None
+        self.last_command = None
 
     ####################################################################################################################
     # Data access
@@ -70,6 +78,7 @@ class ServerConnection:
     # Frame buffer management
     def _reset_frame_buffer(self):
         """ Reset the frame buffer to initial state """
+        self.prev_observation_buffer = self.observation_buffer
         self.observation_buffer = [None for _ in range(self.number_of_clients)]
         self.reward_buffer = [None for _ in range(self.number_of_clients)]
         self.done_buffer = [None for _ in range(self.number_of_clients)]
@@ -144,8 +153,32 @@ class ServerConnection:
         if self.is_closed:
             raise ServerClosedException("Environment already closed")
 
+        start_time = time.time()
+
         while not self._is_frame_buffer_ready():
             self._communication_loop()
+
+            # If we're timing out, unregister old environments
+            if time.time() - start_time > self.configuration.timeout:
+                for idx, frame in enumerate(self.observation_buffer):
+                    if frame is None:
+                        self._unregister_env(idx)
+
+                        prev_observation = self.prev_observation_buffer[idx]
+
+                        if prev_observation is None:
+                            # No previous observations, just start everything from scratch
+                            self._reset_communication_state()
+                            self._resend_last_command()
+                        else:
+                            self.observation_buffer[idx] = self.prev_observation_buffer[idx]
+
+                            self.done_buffer[idx] = True
+                            self.reward_buffer[idx] = 0.0
+
+                start_time = time.time()
+
+        self.last_command = None
 
         # For now we don't care about infos. That may change
         infos = [{} for _ in range(self.number_of_clients)]
@@ -170,27 +203,47 @@ class ServerConnection:
 
     ####################################################################################################################
     # Communication bits
+    def _reset_communication_state(self):
+        """ Reset client-server state """
+        self.client_env_map = {}
+        self.env_client_map = {}
+
+        self.prev_observation_buffer = [None for _ in range(self.number_of_clients)]
+        self.observation_buffer = [None for _ in range(self.number_of_clients)]
+        self.reward_buffer = [None for _ in range(self.number_of_clients)]
+        self.done_buffer = [None for _ in range(self.number_of_clients)]
+
+        self.command_nonce = None
+
+    def _resend_last_command(self):
+        """ Send again last command """
+        self.last_command.nonce = numpy_util.random_int64()
+        self._publish_command(self.last_command)
+
     def _communication_loop(self):
         """
         Main function of the server. Actively listen for connections from the clients and
         respond to their requests
         """
-        request = pb.MasterRequest()
-        request.ParseFromString(self.request_socket.recv())
+        poll_status = dict(self.request_poller.poll(self.configuration.timeout * 1000))
 
-        if request.command != pb.MasterRequest.INITIALIZE and request.instance_id != self.instance_id:
-            # Received request for the wrong server
-            response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
-            self.request_socket.send(response.SerializeToString())
-        else:
-            if request.command == pb.MasterRequest.INITIALIZE:
-                self._handle_initialize_request()
-            elif request.command == pb.MasterRequest.CONNECT:
-                self._handle_connect_request(request)
-            elif request.command == pb.MasterRequest.FRAME:
-                self._handle_frame_request(request)
+        if poll_status:
+            request = pb.MasterRequest()
+            request.ParseFromString(self.request_socket.recv())
+
+            if request.command != pb.MasterRequest.INITIALIZE and request.instance_id != self.instance_id:
+                # Received request for the wrong server
+                response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
+                self.request_socket.send(response.SerializeToString())
             else:
-                raise ServerHandlerException(f"Received unknown request: {request}")
+                if request.command == pb.MasterRequest.INITIALIZE:
+                    self._handle_initialize_request()
+                elif request.command == pb.MasterRequest.CONNECT:
+                    self._handle_connect_request(request)
+                elif request.command == pb.MasterRequest.FRAME:
+                    self._handle_frame_request(request)
+                else:
+                    raise ServerHandlerException(f"Received unknown request: {request}")
 
     def _handle_initialize_request(self):
         """ Handle the INITIALIZE request from the client """
@@ -221,14 +274,24 @@ class ServerConnection:
             # Accept new client
             new_environment_id = self._map_new_env(request.client_id)
 
-            response = pb.MasterResponse(
-                response=pb.MasterResponse.OK,
-                connect_response=pb.ConnectResponse(
-                    environment_id=new_environment_id
+            if self.last_command is not None:
+                response = pb.MasterResponse(
+                    response=pb.MasterResponse.OK,
+                    connect_response=pb.ConnectResponse(
+                        environment_id=new_environment_id,
+                        last_command=self.last_command
+                    )
                 )
-            )
+            else:
+                response = pb.MasterResponse(
+                    response=pb.MasterResponse.OK,
+                    connect_response=pb.ConnectResponse(
+                        environment_id=new_environment_id
+                    )
+                )
 
             self.logger.info(f"Master: assigned client id {request.client_id} to environment {new_environment_id}")
+            self.logger.info(f"Client env map: {self.client_env_map}")
 
             self.client_env_map[request.client_id] = new_environment_id
             self.env_client_map[new_environment_id] = request.client_id
@@ -236,7 +299,7 @@ class ServerConnection:
             self.request_socket.send(response.SerializeToString())
         else:
             # Too many clients connected, ignore for now
-            response = pb.MasterResponse(reponse=pb.MasterResponse.WAIT)
+            response = pb.MasterResponse(response=pb.MasterResponse.WAIT)
             self.request_socket.send(response.SerializeToString())
 
     def _map_new_env(self, client_id):
@@ -249,31 +312,49 @@ class ServerConnection:
 
         return None
 
+    def _unregister_env(self, env_id):
+        """ Map client to a free environment slot """
+        if env_id in self.env_client_map:
+            self.logger.info(f"Unregistering stale environment {env_id}")
+            client_id = self.env_client_map[env_id]
+
+            del self.env_client_map[env_id]
+            del self.client_env_map[client_id]
+
     def _handle_frame_request(self, request):
         """ Handle the FRAME request from the client """
         frame = request.frame
 
         if frame.nonce == self.command_nonce:
-            environment_id = self.client_env_map[request.client_id]
+            if request.client_id in self.client_env_map and self.env_client_map[self.client_env_map[request.client_id]] == request.client_id:
+                environment_id = self.client_env_map[request.client_id]
 
-            self.logger.info(f"Received frame with correct nonce from {request.client_id}/{environment_id}")
+                self.logger.info(f"Received frame with correct nonce from {request.client_id}/{environment_id}")
 
-            self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
-            self.reward_buffer[environment_id] = frame.reward
-            self.done_buffer[environment_id] = frame.done
+                self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
+                self.reward_buffer[environment_id] = frame.reward
+                self.done_buffer[environment_id] = frame.done
 
-            # Just confirm receipt, nothing more
-            response = pb.MasterResponse(
-                response=pb.MasterResponse.OK
-            )
-            self.request_socket.send(response.SerializeToString())
+                # Just confirm receipt, nothing more
+                response = pb.MasterResponse(
+                    response=pb.MasterResponse.OK
+                )
+                self.request_socket.send(response.SerializeToString())
+            else:
+                self.logger.info(f"Received frame with stale client {request.client_id}")
+                self.logger.info(self.client_env_map)
+                self.logger.info(self.env_client_map)
+
+                response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
+                self.request_socket.send(response.SerializeToString())
         else:
             self.logger.info(f"Received frame with incorrect nonce")
             # Notify client of an error request
-            response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
+            response = pb.MasterResponse(response=pb.MasterResponse.SOFT_ERROR)
             self.request_socket.send(response.SerializeToString())
 
     def _publish_command(self, command):
         """ Send a command to all the clients """
         self.command_nonce = command.nonce
+        self.last_command = command
         self.command_socket.send(command.SerializeToString())

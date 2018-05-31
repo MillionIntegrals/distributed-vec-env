@@ -30,11 +30,19 @@ class ClientBase(abc.ABC):
         self.logger = logging.getLogger(__name__)
 
         self.command_socket = self.context.socket(zmq.SUB)
+        self.command_socket.setsockopt(zmq.LINGER, self.configuration.linger_period * 1000)
         self.command_socket.connect('{}:{}'.format(self.configuration.server_url, self.configuration.command_port))
         self.command_socket.setsockopt(zmq.SUBSCRIBE, b'')
 
+        self.command_poller = zmq.Poller()
+        self.command_poller.register(self.command_socket, zmq.POLLIN)
+
         self.request_socket = self.context.socket(zmq.REQ)
+        self.request_socket.setsockopt(zmq.LINGER, self.configuration.linger_period * 1000)
         self.request_socket.connect('{}:{}'.format(self.configuration.server_url, self.configuration.request_port))
+
+        self.request_poller = zmq.Poller()
+        self.request_poller.register(self.request_socket, zmq.POLLIN | zmq.POLLOUT)
 
         # Received via initialization
         self.is_initialized = False
@@ -45,6 +53,7 @@ class ClientBase(abc.ABC):
         self.environment_id = None
         self.server_config = None
         self.command_nonce = None
+        self.last_command = None
 
     def run(self):
         """ Run this client """
@@ -54,8 +63,14 @@ class ClientBase(abc.ABC):
             if not self.is_initialized:
                 self.init()
             else:
-                command = self._fetch_command()
-                done = self.run_command(command)
+                if self.last_command is not None:
+                    done = self.run_command(self.last_command, ignore_errors=True)
+                    self.last_command = None
+                else:
+                    command = self._fetch_command()
+
+                    if command is not None:
+                        done = self.run_command(command)
 
     ####################################################################################################################
     # Env interface
@@ -88,9 +103,8 @@ class ClientBase(abc.ABC):
     # Internal logic
     def init(self):
         """ Perform the initial handshake dance between the client and server to register for a mutual cooperation """
-        self.logger.info(f"Worker uninitialized: waiting for environment name")
-
         if self.client_id is None:
+            self.logger.info(f"Worker uninitialized: waiting for environment name")
             if not self._send_initialize_request():
                 return
 
@@ -103,24 +117,27 @@ class ClientBase(abc.ABC):
 
         self.logger.info(f"Worker {self.client_id}/{self.environment_id}: properly initialized")
 
+        self.reset_env()
         self.is_initialized = True
 
-    def run_command(self, message):
+    def run_command(self, message, ignore_errors=False):
         """ Respond to a command received from the server """
         if message.command == pb.WorkerCommand.STEP:
             self.logger.info(f"Worker {self.client_id} received command STEP")
             self.command_nonce = message.nonce
-            self._send_frame(self.step_env(message.actions[self.environment_id]))
+            self._send_frame(self.step_env(message.actions[self.environment_id]), ignore_errors=ignore_errors)
             return False
         elif message.command == pb.WorkerCommand.RESET:
             self.logger.info(f"Worker {self.client_id} received command RESET")
             self.command_nonce = message.nonce
-            self._send_frame(self.reset_env())
+            self._send_frame(self.reset_env(), ignore_errors=ignore_errors)
             return False
         elif message.command == pb.WorkerCommand.CLOSE:
             self.logger.info(f"Worker {self.client_id} received command CLOSE")
             self.close()
             return True
+        elif message.command == pb.WorkerCommand.NO_COMMAND:
+            return False
         else:
             raise ClientCommandException(f"Unknown command received from the server: {message}")
 
@@ -136,6 +153,7 @@ class ClientBase(abc.ABC):
         self.environment_id = None
         self.server_config = None
         self.command_nonce = None
+        self.last_command = None
 
     def close(self):
         """ Close the client and free the resources """
@@ -147,54 +165,72 @@ class ClientBase(abc.ABC):
     # Requests to the server
     def _send_initialize_request(self):
         """ Request a name from the server """
-        request = pb.MasterRequest(command=pb.MasterRequest.INITIALIZE)
-        self.request_socket.send(request.SerializeToString())
+        poll_status = dict(self.request_poller.poll(self.configuration.timeout * 1000))
 
-        response = pb.MasterResponse()
-        response.ParseFromString(self.request_socket.recv())
+        if self.request_socket in poll_status and poll_status[self.request_socket] == zmq.POLLOUT:
+            request = pb.MasterRequest(command=pb.MasterRequest.INITIALIZE)
+            self.request_socket.send(request.SerializeToString())
 
-        if response.response == pb.MasterResponse.OK:
-            name_response = response.name_response
+            response = pb.MasterResponse()
+            response.ParseFromString(self.request_socket.recv())
 
-            if name_response.server_version != self.configuration.server_version:
-                raise ClientInitializationException(
-                    f"Server version {name_response.server_version} does not match client version "
-                    f"{self.configuration.server_version}"
-                )
+            if response.response == pb.MasterResponse.OK:
+                name_response = response.name_response
 
-            self.environment_name = name_response.name
-            self.environment_seed = name_response.seed
-            self.client_id = name_response.client_id
-            self.server_instance_id = name_response.instance_id
-            return True
+                if name_response.server_version != self.configuration.server_version:
+                    raise ClientInitializationException(
+                        f"Server version {name_response.server_version} does not match client version "
+                        f"{self.configuration.server_version}"
+                    )
+
+                self.environment_name = name_response.name
+                self.environment_seed = name_response.seed
+                self.client_id = name_response.client_id
+                self.server_instance_id = name_response.instance_id
+                return True
+            else:
+                self.reset_client()
+                return False
         else:
             self.reset_client()
             return False
 
     def _send_connect_request(self, payload):
         """ Register environment with the server """
-        request = pb.MasterRequest(
-            command=pb.MasterRequest.CONNECT,
-            client_id=self.client_id,
-            instance_id=self.server_instance_id,
-            connect_payload=payload
-        )
-        self.request_socket.send(request.SerializeToString())
+        poll_status = dict(self.request_poller.poll(self.configuration.timeout * 1000))
 
-        response = pb.MasterResponse()
-        response.ParseFromString(self.request_socket.recv())
+        if self.request_socket in poll_status and poll_status[self.request_socket] == zmq.POLLOUT:
+            request = pb.MasterRequest(
+                command=pb.MasterRequest.CONNECT,
+                client_id=self.client_id,
+                instance_id=self.server_instance_id,
+                connect_payload=payload
+            )
 
-        if response.response == pb.MasterResponse.OK:
-            self.environment_id = response.connect_response.environment_id
-            return True
-        elif response.response == pb.MasterResponse.WAIT:
-            time.sleep(self.configuration.wait_period)
-            return False
+            self.request_socket.send(request.SerializeToString())
+
+            response = pb.MasterResponse()
+            response.ParseFromString(self.request_socket.recv())
+
+            if response.response == pb.MasterResponse.OK:
+                self.environment_id = response.connect_response.environment_id
+
+                if response.connect_response.last_command:
+                    self.last_command = response.connect_response.last_command
+
+                return True
+            elif response.response == pb.MasterResponse.WAIT:
+                self.logger.info(f"Worker {self.client_id} received wait command - server is busy")
+                time.sleep(self.configuration.wait_period)
+                return False
+            else:
+                self.reset_client()
+                return False
         else:
             self.reset_client()
             return False
 
-    def _send_frame(self, frame):
+    def _send_frame(self, frame, ignore_errors=True):
         """ Send environment frame to the server """
         frame.nonce = self.command_nonce
 
@@ -211,13 +247,23 @@ class ClientBase(abc.ABC):
 
         if response.response == pb.MasterResponse.OK:
             return True
+        if response.response == pb.MasterResponse.SOFT_ERROR:
+            return False
         else:
-            self.reset_client()
+            if not ignore_errors:
+                self.reset_client()
             return False
 
     def _fetch_command(self):
         """ Wait for command from the server """
-        message = pb.WorkerCommand()
-        message.ParseFromString(self.command_socket.recv())
-        return message
+        poll_status = self.command_poller.poll(self.configuration.timeout * 1000)
+
+        if poll_status:
+            message = pb.WorkerCommand()
+            message.ParseFromString(self.command_socket.recv())
+            return message
+        else:
+            self.logger.info(f"Worker {self.client_id} timeout - resetting state")
+            self.reset_client()
+            return None
 

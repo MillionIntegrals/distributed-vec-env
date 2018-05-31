@@ -17,7 +17,7 @@ def main():
         number_of_environments=2,
         environment_name='BreakoutNoFrameskip-v4',
         server_version=1,
-        timeout=10
+        timeout=5
     )
 
     env = DistributedVecEnv(configuration)
@@ -34,13 +34,14 @@ def main():
     print(dones)
     print(infos)
 
-    obs, rews, dones, infos = env.step([1, 0])
+    while True:
+        obs, rews, dones, infos = env.step([1, 0])
 
-    print("After second action:")
-    print(obs.shape)
-    print(rews)
-    print(dones)
-    print(infos)
+        print("After second action:")
+        print(obs.shape)
+        print(rews)
+        print(dones)
+        print(infos)
 
     obs, rews, dones, infos = env.step([0, 1])
 

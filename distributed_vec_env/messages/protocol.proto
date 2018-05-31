@@ -47,6 +47,7 @@ message MasterResponse {
         OK = 0;
         ERROR = 1;
         WAIT = 2;
+        SOFT_ERROR = 3;
     }
 
     ConfirmationResponseEnum response = 1;
@@ -61,6 +62,7 @@ message MasterResponse {
 // Master responses
 message ConnectResponse {
     int32 environment_id = 2;
+    WorkerCommand last_command = 3;
 }
 
 
@@ -77,9 +79,10 @@ message NameResponse {
 message WorkerCommand {
     // Commands set from master to workers
     enum WorkerCommandEnum {
-        STEP = 0;
-        RESET = 1;
-        CLOSE = 2;
+        NO_COMMAND = 0;
+        STEP = 1;
+        RESET = 2;
+        CLOSE = 3;
     }
 
     WorkerCommandEnum command = 1;

@@ -1,11 +1,13 @@
 class ServerConfiguration:
     """ Configuration of network server distributing work among workers """
 
-    def __init__(self, server_url, command_port, request_port, number_of_environments, environment_name, server_version=1, timeout=30):
+    def __init__(self, server_url, command_port, request_port, number_of_environments, environment_name,
+                 server_version=1, timeout=30, linger_period=1):
         self.server_url = server_url
         self.command_port = command_port
         self.request_port = request_port
         self.number_of_environments = number_of_environments
+        self.linger_period = linger_period
 
         self.environment_name = environment_name
         self.server_version = server_version

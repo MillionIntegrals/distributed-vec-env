@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='protocol.proto',
   package='',
   syntax='proto3',
-  serialized_pb=_b('\n\x0eprotocol.proto\"\xf7\x01\n\rMasterRequest\x12\x31\n\x07\x63ommand\x18\x01 \x01(\x0e\x32 .MasterRequest.MasterRequestEnum\x12\x11\n\tclient_id\x18\x02 \x01(\x05\x12\x13\n\x0binstance_id\x18\x03 \x01(\x03\x12*\n\x0f\x63onnect_payload\x18\x04 \x01(\x0b\x32\x0f.ConnectRequestH\x00\x12\x17\n\x05\x66rame\x18\x05 \x01(\x0b\x32\x06.FrameH\x00\";\n\x11MasterRequestEnum\x12\x0e\n\nINITIALIZE\x10\x00\x12\x0b\n\x07\x43ONNECT\x10\x01\x12\t\n\x05\x46RAME\x10\x02\x42\t\n\x07payload\" \n\x0e\x43onnectRequest\x12\x0e\n\x06spaces\x18\x01 \x01(\x0c\"Q\n\x05\x46rame\x12\x1b\n\x0bobservation\x18\x01 \x01(\x0b\x32\x06.Array\x12\x0e\n\x06reward\x18\x02 \x01(\x01\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\x12\r\n\x05nonce\x18\x04 \x01(\x03\"3\n\x05\x41rray\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\r\n\x05shape\x18\x02 \x03(\x05\x12\r\n\x05\x64type\x18\x03 \x01(\t\"\xe6\x01\n\x0eMasterResponse\x12:\n\x08response\x18\x01 \x01(\x0e\x32(.MasterResponse.ConfirmationResponseEnum\x12,\n\x10\x63onnect_response\x18\x02 \x01(\x0b\x32\x10.ConnectResponseH\x00\x12&\n\rname_response\x18\x03 \x01(\x0b\x32\r.NameResponseH\x00\"7\n\x18\x43onfirmationResponseEnum\x12\x06\n\x02OK\x10\x00\x12\t\n\x05\x45RROR\x10\x01\x12\x08\n\x04WAIT\x10\x02\x42\t\n\x07payload\")\n\x0f\x43onnectResponse\x12\x16\n\x0e\x65nvironment_id\x18\x02 \x01(\x05\"j\n\x0cNameResponse\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x05\x12\x16\n\x0eserver_version\x18\x03 \x01(\x05\x12\x11\n\tclient_id\x18\x04 \x01(\x05\x12\x13\n\x0binstance_id\x18\x05 \x01(\x03\"\x97\x01\n\rWorkerCommand\x12\x31\n\x07\x63ommand\x18\x01 \x01(\x0e\x32 .WorkerCommand.WorkerCommandEnum\x12\r\n\x05nonce\x18\x02 \x01(\x03\x12\x0f\n\x07\x61\x63tions\x18\x03 \x03(\x05\"3\n\x11WorkerCommandEnum\x12\x08\n\x04STEP\x10\x00\x12\t\n\x05RESET\x10\x01\x12\t\n\x05\x43LOSE\x10\x02\x62\x06proto3')
+  serialized_pb=_b('\n\x0eprotocol.proto\"\xf7\x01\n\rMasterRequest\x12\x31\n\x07\x63ommand\x18\x01 \x01(\x0e\x32 .MasterRequest.MasterRequestEnum\x12\x11\n\tclient_id\x18\x02 \x01(\x05\x12\x13\n\x0binstance_id\x18\x03 \x01(\x03\x12*\n\x0f\x63onnect_payload\x18\x04 \x01(\x0b\x32\x0f.ConnectRequestH\x00\x12\x17\n\x05\x66rame\x18\x05 \x01(\x0b\x32\x06.FrameH\x00\";\n\x11MasterRequestEnum\x12\x0e\n\nINITIALIZE\x10\x00\x12\x0b\n\x07\x43ONNECT\x10\x01\x12\t\n\x05\x46RAME\x10\x02\x42\t\n\x07payload\" \n\x0e\x43onnectRequest\x12\x0e\n\x06spaces\x18\x01 \x01(\x0c\"Q\n\x05\x46rame\x12\x1b\n\x0bobservation\x18\x01 \x01(\x0b\x32\x06.Array\x12\x0e\n\x06reward\x18\x02 \x01(\x01\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\x12\r\n\x05nonce\x18\x04 \x01(\x03\"3\n\x05\x41rray\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\r\n\x05shape\x18\x02 \x03(\x05\x12\r\n\x05\x64type\x18\x03 \x01(\t\"\xf6\x01\n\x0eMasterResponse\x12:\n\x08response\x18\x01 \x01(\x0e\x32(.MasterResponse.ConfirmationResponseEnum\x12,\n\x10\x63onnect_response\x18\x02 \x01(\x0b\x32\x10.ConnectResponseH\x00\x12&\n\rname_response\x18\x03 \x01(\x0b\x32\r.NameResponseH\x00\"G\n\x18\x43onfirmationResponseEnum\x12\x06\n\x02OK\x10\x00\x12\t\n\x05\x45RROR\x10\x01\x12\x08\n\x04WAIT\x10\x02\x12\x0e\n\nSOFT_ERROR\x10\x03\x42\t\n\x07payload\"O\n\x0f\x43onnectResponse\x12\x16\n\x0e\x65nvironment_id\x18\x02 \x01(\x05\x12$\n\x0clast_command\x18\x03 \x01(\x0b\x32\x0e.WorkerCommand\"j\n\x0cNameResponse\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x05\x12\x16\n\x0eserver_version\x18\x03 \x01(\x05\x12\x11\n\tclient_id\x18\x04 \x01(\x05\x12\x13\n\x0binstance_id\x18\x05 \x01(\x03\"\xa7\x01\n\rWorkerCommand\x12\x31\n\x07\x63ommand\x18\x01 \x01(\x0e\x32 .WorkerCommand.WorkerCommandEnum\x12\r\n\x05nonce\x18\x02 \x01(\x03\x12\x0f\n\x07\x61\x63tions\x18\x03 \x03(\x05\"C\n\x11WorkerCommandEnum\x12\x0e\n\nNO_COMMAND\x10\x00\x12\x08\n\x04STEP\x10\x01\x12\t\n\x05RESET\x10\x02\x12\t\n\x05\x43LOSE\x10\x03\x62\x06proto3')
 )
 
 
@@ -68,11 +68,15 @@ _MASTERRESPONSE_CONFIRMATIONRESPONSEENUM = _descriptor.EnumDescriptor(
       name='WAIT', index=2, number=2,
       options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOFT_ERROR', index=3, number=3,
+      options=None,
+      type=None),
   ],
   containing_type=None,
   options=None,
   serialized_start=603,
-  serialized_end=658,
+  serialized_end=674,
 )
 _sym_db.RegisterEnumDescriptor(_MASTERRESPONSE_CONFIRMATIONRESPONSEENUM)
 
@@ -83,22 +87,26 @@ _WORKERCOMMAND_WORKERCOMMANDENUM = _descriptor.EnumDescriptor(
   file=DESCRIPTOR,
   values=[
     _descriptor.EnumValueDescriptor(
-      name='STEP', index=0, number=0,
+      name='NO_COMMAND', index=0, number=0,
       options=None,
       type=None),
     _descriptor.EnumValueDescriptor(
-      name='RESET', index=1, number=1,
+      name='STEP', index=1, number=1,
       options=None,
       type=None),
     _descriptor.EnumValueDescriptor(
-      name='CLOSE', index=2, number=2,
+      name='RESET', index=2, number=2,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CLOSE', index=3, number=3,
       options=None,
       type=None),
   ],
   containing_type=None,
   options=None,
-  serialized_start=923,
-  serialized_end=974,
+  serialized_start=977,
+  serialized_end=1044,
 )
 _sym_db.RegisterEnumDescriptor(_WORKERCOMMAND_WORKERCOMMANDENUM)
 
@@ -339,7 +347,7 @@ _MASTERRESPONSE = _descriptor.Descriptor(
       index=0, containing_type=None, fields=[]),
   ],
   serialized_start=439,
-  serialized_end=669,
+  serialized_end=685,
 )
 
 
@@ -357,6 +365,13 @@ _CONNECTRESPONSE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='last_command', full_name='ConnectResponse.last_command', index=1,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -369,8 +384,8 @@ _CONNECTRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=671,
-  serialized_end=712,
+  serialized_start=687,
+  serialized_end=766,
 )
 
 
@@ -428,8 +443,8 @@ _NAMERESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=714,
-  serialized_end=820,
+  serialized_start=768,
+  serialized_end=874,
 )
 
 
@@ -474,8 +489,8 @@ _WORKERCOMMAND = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=823,
-  serialized_end=974,
+  serialized_start=877,
+  serialized_end=1044,
 )
 
 _MASTERREQUEST.fields_by_name['command'].enum_type = _MASTERREQUEST_MASTERREQUESTENUM
@@ -499,6 +514,7 @@ _MASTERRESPONSE.fields_by_name['connect_response'].containing_oneof = _MASTERRES
 _MASTERRESPONSE.oneofs_by_name['payload'].fields.append(
   _MASTERRESPONSE.fields_by_name['name_response'])
 _MASTERRESPONSE.fields_by_name['name_response'].containing_oneof = _MASTERRESPONSE.oneofs_by_name['payload']
+_CONNECTRESPONSE.fields_by_name['last_command'].message_type = _WORKERCOMMAND
 _WORKERCOMMAND.fields_by_name['command'].enum_type = _WORKERCOMMAND_WORKERCOMMANDENUM
 _WORKERCOMMAND_WORKERCOMMANDENUM.containing_type = _WORKERCOMMAND
 DESCRIPTOR.message_types_by_name['MasterRequest'] = _MASTERREQUEST
