@@ -58,8 +58,8 @@ class ClientBase(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def env_initialization_payload(self):
-        """ Populate environment initialization request """
+    def env_space_payload(self):
+        """ Populate environment connection request """
         pass
 
     @abc.abstractmethod
@@ -82,24 +82,24 @@ class ClientBase(abc.ABC):
     def init(self):
         """ Perform the initial handshake dance between the client and server to register for a mutual cooperation """
         self.logger.info(f"Worker uninitialized: waiting for environment name")
-        environment_name, seed, self.client_id = self._send_name_request()
+        environment_name, seed, self.client_id = self._send_initialize_request()
         self.initialize_env(environment_name, seed)
 
         self.logger.info(f"Worker {self.client_id}: waiting for registration")
-        self.environment_id = self._send_initialization_request(self.env_initialization_payload())
+        self.environment_id = self._send_connect_request(self.env_space_payload())
         self.logger.info(f"Worker {self.client_id}/{self.environment_id}: properly initialized")
 
     def run_command(self, message):
         """ Respond to a command received from the server """
-        if message.command == pb.WorkerMessage.STEP:
+        if message.command == pb.WorkerCommand.STEP:
             self.logger.info(f"Worker {self.client_id} received command STEP")
             self._send_frame(self.step_env(message.actions[self.environment_id]))
             return False
-        elif message.command == pb.WorkerMessage.RESET:
+        elif message.command == pb.WorkerCommand.RESET:
             self.logger.info(f"Worker {self.client_id} received command RESET")
             self._send_frame(self.reset_env())
             return False
-        elif message.command == pb.WorkerMessage.CLOSE:
+        elif message.command == pb.WorkerCommand.CLOSE:
             self.logger.info(f"Worker {self.client_id} received command CLOSE")
             self.close()
             return True
@@ -114,12 +114,9 @@ class ClientBase(abc.ABC):
 
     ####################################################################################################################
     # Requests to the server
-    def _send_name_request(self):
+    def _send_initialize_request(self):
         """ Request a name from the server """
-        request = pb.MasterRequest(
-            command=pb.MasterRequest.NAME,
-            client_id=0
-        )
+        request = pb.MasterRequest(command=pb.MasterRequest.INITIALIZE)
         self.request_socket.send(request.SerializeToString())
 
         response = pb.NameResponse()
@@ -133,16 +130,16 @@ class ClientBase(abc.ABC):
 
         return response.name, response.seed, response.client_id
 
-    def _send_initialization_request(self, initialization_payload):
+    def _send_connect_request(self, payload):
         """ Register environment with the server """
         request = pb.MasterRequest(
-            command=pb.MasterRequest.INITIALIZATION,
+            command=pb.MasterRequest.CONNECT,
             client_id=self.client_id,
-            initialization=initialization_payload
+            connect_payload=payload
         )
         self.request_socket.send(request.SerializeToString())
 
-        response = pb.InitializationResponse()
+        response = pb.ConnectResponse()
         response.ParseFromString(self.request_socket.recv())
 
         return response.environment_id
@@ -159,7 +156,7 @@ class ClientBase(abc.ABC):
 
     def _fetch_command(self):
         """ Wait for command from the server """
-        message = pb.WorkerMessage()
+        message = pb.WorkerCommand()
         message.ParseFromString(self.command_socket.recv())
         return message
 

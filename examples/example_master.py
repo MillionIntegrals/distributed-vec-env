@@ -24,12 +24,12 @@ def main():
     obs = env.reset()
 
     print("After reset:")
-    print([x.shape for x in obs])
+    print(obs.shape)
 
     obs, rews, dones, infos = env.step([0, 0])
 
     print("After first action:")
-    print([x.shape for x in obs])
+    print(obs.shape)
     print(rews)
     print(dones)
     print(infos)
@@ -37,7 +37,7 @@ def main():
     obs, rews, dones, infos = env.step([1, 0])
 
     print("After second action:")
-    print([x.shape for x in obs])
+    print(obs.shape)
     print(rews)
     print(dones)
     print(infos)
@@ -45,7 +45,7 @@ def main():
     obs, rews, dones, infos = env.step([0, 1])
 
     print("After third action:")
-    print([x.shape for x in obs])
+    print(obs.shape)
     print(rews)
     print(dones)
     print(infos)

@@ -1,14 +1,21 @@
-import zmq
-import pickle
 import logging
+import numpy as np
+import pickle
+import zmq
 
 import distributed_vec_env.messages.protocol_pb2 as pb
 import distributed_vec_env.numpy_util as numpy_util
+
 
 from .server_configuration import ServerConfiguration
 
 
 class ServerHandlerException(Exception):
+    """ Exception during server request handling """
+    pass
+
+
+class ServerClosedException(Exception):
     """ Exception during server request handling """
     pass
 
@@ -41,7 +48,11 @@ class ServerConnection:
 
         self.observation_space = None
         self.action_space = None
+
         self.is_closed = False
+
+        self.instance_id = numpy_util.random_int64()
+        self.command_nonce = None
 
     ####################################################################################################################
     # Data access
@@ -65,6 +76,12 @@ class ServerConnection:
     # External interface
     def initialize(self):
         """ Perform initial handshake with all the clients and make sure there are enough to proceed """
+        if self.connected_clients > 0:
+            raise ServerHandlerException("Server already initialized")
+
+        if self.is_closed:
+            raise ServerClosedException("Server already closed")
+
         self.logger.info("Master: awaiting initialization")
 
         while self.connected_clients < self.number_of_clients:
@@ -77,11 +94,14 @@ class ServerConnection:
         Reset all underlying client environments.
         Returns an array of observations
         """
-        command = pb.WorkerMessage(
-            command=pb.WorkerMessage.RESET
+        command = pb.WorkerCommand(
+            command=pb.WorkerCommand.RESET,
+            nonce=numpy_util.random_int64()
         )
+
         self._publish_command(command)
         self._reset_frame_buffer()
+
         obs, _, _, _ = self.gather_frames()
         return obs
 
@@ -90,10 +110,12 @@ class ServerConnection:
         Send actions to the environments.
         Wait for their responses.
         """
-        command = pb.WorkerMessage(
-            command=pb.WorkerMessage.STEP,
+        command = pb.WorkerCommand(
+            command=pb.WorkerCommand.STEP,
+            nonce=numpy_util.random_int64(),
             actions=actions
         )
+
         self._publish_command(command)
         self._reset_frame_buffer()
 
@@ -112,17 +134,21 @@ class ServerConnection:
 
         # For now we don't care about infos. That may change
         infos = [{} for _ in range(self.number_of_clients)]
-        return self.observation_buffer, self.reward_buffer, self.done_buffer, infos
+        return np.stack(self.observation_buffer, axis=0), self.reward_buffer, self.done_buffer, infos
 
     def close_environments(self):
         """ Close all child environments """
         self.is_closed = True
 
-        command = pb.WorkerMessage(
-            command=pb.WorkerMessage.CLOSE,
+        command = pb.WorkerCommand(
+            command=pb.WorkerCommand.CLOSE,
+            nonce=numpy_util.random_int64()
         )
 
         self._publish_command(command)
+
+        self.request_socket.close()
+        self.command_socket.close()
 
     ####################################################################################################################
     # Communication bits
@@ -134,59 +160,72 @@ class ServerConnection:
         request = pb.MasterRequest()
         request.ParseFromString(self.request_socket.recv())
 
-        if request.command == pb.MasterRequest.INITIALIZATION:
-            if self.observation_space is None or self.action_space is None:
-                self.observation_space, self.action_space = pickle.loads(request.initialization.spaces)
-
-            if self.connected_clients < self.number_of_clients:
-                # Accept new client
-                # Heuristic, for now
-                new_environment_id = request.client_id
-
-                response = pb.InitializationResponse(
-                    environment_id=new_environment_id
-                )
-
-                self.logger.info(f"Master: assigned client id {request.client_id} to environment {new_environment_id}")
-
-                self.client_env_map[request.client_id] = new_environment_id
-                self.env_client_map[new_environment_id] = request.client_id
-                self.connected_clients += 1
-
-                self.request_socket.send(response.SerializeToString())
-            else:
-                # Too many clients connected, ignore for now
-                response = pb.InitializationResponse()
-                self.request_socket.send(response.SerializeToString())
+        if request.command == pb.MasterRequest.INITIALIZE:
+            self._handle_initialize_request()
+        elif request.command == pb.MasterRequest.CONNECT:
+            self._handle_connect_request(request)
         elif request.command == pb.MasterRequest.FRAME:
-            frame = request.frame
-            environment_id = self.client_env_map[request.client_id]
-
-            self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
-            self.reward_buffer[environment_id] = frame.reward
-            self.done_buffer[environment_id] = frame.done
-
-            # Just confirm receipt, nothing more
-            response = pb.ConfirmationResponse()
-            self.request_socket.send(response.SerializeToString())
-        elif request.command == pb.MasterRequest.NAME:
-            response = pb.NameResponse(
-                name=self.configuration.environment_name,
-                seed=self.last_client_id_assigned,
-                server_version=self.configuration.server_version,
-                client_id=self.last_client_id_assigned
-            )
-
-            self.logger.info(f"Master: assigned client id {self.last_client_id_assigned}")
-
-            # Client ids are monotonically increasing
-            self.last_client_id_assigned += 1
-
-            self.request_socket.send(response.SerializeToString())
+            self._handle_frame_request(request)
         else:
             raise ServerHandlerException(f"Received unknown request: {request}")
 
+    def _handle_initialize_request(self):
+        """ Handle the INITIALIZE request from the client """
+        response = pb.NameResponse(
+            name=self.configuration.environment_name,
+            seed=self.last_client_id_assigned,
+            server_version=self.configuration.server_version,
+            client_id=self.last_client_id_assigned
+        )
+
+        self.logger.info(f"Master: assigned client id {self.last_client_id_assigned}")
+
+        # Client ids are monotonically increasing
+        self.last_client_id_assigned += 1
+
+        self.request_socket.send(response.SerializeToString())
+
+    def _handle_connect_request(self, request):
+        """ Handle the CONNECT request from the client """
+        if self.observation_space is None or self.action_space is None:
+            self.observation_space, self.action_space = pickle.loads(request.connect_payload.spaces)
+
+        if self.connected_clients < self.number_of_clients:
+            # Accept new client
+            # TODO(jerry): This is a heuristic just for a short time
+            new_environment_id = request.client_id
+
+            response = pb.ConnectResponse(
+                environment_id=new_environment_id
+            )
+
+            self.logger.info(f"Master: assigned client id {request.client_id} to environment {new_environment_id}")
+
+            self.client_env_map[request.client_id] = new_environment_id
+            self.env_client_map[new_environment_id] = request.client_id
+            self.connected_clients += 1
+
+            self.request_socket.send(response.SerializeToString())
+        else:
+            # Too many clients connected, ignore for now
+            response = pb.ConnectResponse()
+            self.request_socket.send(response.SerializeToString())
+
+    def _handle_frame_request(self, request):
+        """ Handle the FRAME request from the client """
+        frame = request.frame
+        environment_id = self.client_env_map[request.client_id]
+
+        self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
+        self.reward_buffer[environment_id] = frame.reward
+        self.done_buffer[environment_id] = frame.done
+
+        # Just confirm receipt, nothing more
+        response = pb.ConfirmationResponse()
+        self.request_socket.send(response.SerializeToString())
+
     def _publish_command(self, command):
         """ Send a command to all the clients """
+        self.command_nonce = command.nonce
         self.command_socket.send(command.SerializeToString())
 

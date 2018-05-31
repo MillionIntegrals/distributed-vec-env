@@ -3,24 +3,25 @@ syntax = "proto3";
 
 message MasterRequest {
     // Requests sent do master from the workers
-    enum MasterCommand {
-        INITIALIZATION = 0;  // Register client at the server
-        FRAME = 1;  // Send frame from client to the server
-        NAME = 2;  // Ask server for the environment name
+    enum MasterRequestEnum {
+        INITIALIZE = 0;  // Ask server for preliminary information and establish a relationship
+        CONNECT = 1;  // Register client at the server for an environment and commit to sending frames
+        FRAME = 2;  // Send frame from client to the server
     }
 
-    MasterCommand command = 1;
+    MasterRequestEnum command = 1;
     int32 client_id = 2;
+    int64 instance_id = 3;
 
     oneof payload {
-        InitializationRequest initialization = 3;
-        Frame frame = 4;
+        ConnectRequest connect_payload = 4;
+        Frame frame = 5;
     }
 }
 
 
 // Send space definition together with initialization request
-message InitializationRequest {
+message ConnectRequest {
     bytes spaces = 1;
 }
 
@@ -30,6 +31,7 @@ message Frame {
     Array observation = 1;
     double reward = 2;
     bool done = 3;
+    int64 nonce = 4;
 }
 
 
@@ -42,13 +44,19 @@ message Array {
 
 
 // Master responses
-message InitializationResponse {
+message ConnectResponse {
     int32 environment_id = 2;
 }
 
 
 // Just an empty confirmation
 message ConfirmationResponse {
+    enum ConfirmationResponseEnum {
+        OK = 0;
+        ERROR = 1;
+    }
+
+    ConfirmationResponseEnum response = 1;
 }
 
 
@@ -58,17 +66,19 @@ message NameResponse {
     int32 seed = 2;
     int32 server_version = 3;
     int32 client_id = 4;
+    int64 instance_id = 5;
 }
 
 
-message WorkerMessage {
+message WorkerCommand {
     // Commands set from master to workers
-    enum WorkerCommand {
+    enum WorkerCommandEnum {
         STEP = 0;
         RESET = 1;
         CLOSE = 2;
     }
 
-    WorkerCommand command = 1;   // 1 = reset, 2 = reset_task, 3 = close, 4 = step, 5 = get spaces
-    repeated int32 actions = 2;  // action per client
+    WorkerCommandEnum command = 1;
+    int64 nonce = 2;
+    repeated int32 actions = 3;  // action per client
 }

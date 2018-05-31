@@ -27,14 +27,12 @@ class EnvClient(ClientBase):
         """ Initialize internal environment """
         self.environment = self.instantiate_env(environment_name, seed)
 
-    def env_initialization_payload(self):
+    def env_space_payload(self):
         """ Populate environment initialization request """
         spaces = self.environment.observation_space, self.environment.action_space
         spaces_bytes = pickle.dumps(spaces)
 
-        return pb.InitializationRequest(
-            spaces=spaces_bytes
-        )
+        return pb.ConnectRequest(spaces=spaces_bytes)
 
     def close_env(self):
         """ Close the environment and free the resources """
