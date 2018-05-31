@@ -2,6 +2,6 @@
 A distributed implementation of OpenAI VecEnv
 
 # TODO:
+- [x] Random Nonce to make sure client and server were initialized in the same run
 - [ ] Handle client disconnects
-- [ ] Random Nonce to make sure client and server were initialized in the same run
 - [ ] Set timeouts on all network operations
