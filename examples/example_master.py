@@ -17,7 +17,7 @@ def main():
         number_of_environments=2,
         environment_name='BreakoutNoFrameskip-v4',
         server_version=1,
-        timeout=5
+        timeout=20
     )
 
     env = DistributedVecEnv(configuration)

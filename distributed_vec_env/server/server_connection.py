@@ -160,9 +160,12 @@ class ServerConnection:
 
             # If we're timing out, unregister old environments
             if time.time() - start_time > self.configuration.timeout:
+                unregistered_any = False
+
                 for idx, frame in enumerate(self.observation_buffer):
-                    if frame is None:
+                    if frame is None and idx in self.env_client_map:
                         self._unregister_env(idx)
+                        unregistered_any = True
 
                         prev_observation = self.prev_observation_buffer[idx]
 
@@ -178,11 +181,19 @@ class ServerConnection:
 
                 start_time = time.time()
 
+                if not unregistered_any:
+                    self._reset_communication_state()
+                    self._resend_last_command()
+
         self.last_command = None
 
         # For now we don't care about infos. That may change
         infos = [{} for _ in range(self.number_of_clients)]
-        return np.stack(self.observation_buffer, axis=0), self.reward_buffer, self.done_buffer, infos
+        result = np.stack(self.observation_buffer, axis=0), self.reward_buffer, self.done_buffer, infos
+
+        self._reset_frame_buffer()
+
+        return result
 
     def close_environments(self):
         """ Close all child environments """
@@ -325,32 +336,32 @@ class ServerConnection:
         """ Handle the FRAME request from the client """
         frame = request.frame
 
-        if frame.nonce == self.command_nonce:
-            if request.client_id in self.client_env_map and self.env_client_map[self.client_env_map[request.client_id]] == request.client_id:
-                environment_id = self.client_env_map[request.client_id]
+        if request.client_id not in self.client_env_map or self.env_client_map[self.client_env_map[request.client_id]] != request.client_id:
+            self.logger.info(f"Received frame with stale client {request.client_id}")
+            self.logger.info(self.client_env_map)
+            self.logger.info(self.env_client_map)
 
-                self.logger.info(f"Received frame with correct nonce from {request.client_id}/{environment_id}")
-
-                self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
-                self.reward_buffer[environment_id] = frame.reward
-                self.done_buffer[environment_id] = frame.done
-
-                # Just confirm receipt, nothing more
-                response = pb.MasterResponse(
-                    response=pb.MasterResponse.OK
-                )
-                self.request_socket.send(response.SerializeToString())
-            else:
-                self.logger.info(f"Received frame with stale client {request.client_id}")
-                self.logger.info(self.client_env_map)
-                self.logger.info(self.env_client_map)
-
-                response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
-                self.request_socket.send(response.SerializeToString())
-        else:
+            response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
+            self.request_socket.send(response.SerializeToString())
+        elif frame.nonce != self.command_nonce:
             self.logger.info(f"Received frame with incorrect nonce")
             # Notify client of an error request
             response = pb.MasterResponse(response=pb.MasterResponse.SOFT_ERROR)
+            self.request_socket.send(response.SerializeToString())
+
+        else:
+            environment_id = self.client_env_map[request.client_id]
+
+            self.logger.info(f"Received frame with correct nonce from {request.client_id}/{environment_id}")
+
+            self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
+            self.reward_buffer[environment_id] = frame.reward
+            self.done_buffer[environment_id] = frame.done
+
+            # Just confirm receipt, nothing more
+            response = pb.MasterResponse(
+                response=pb.MasterResponse.OK
+            )
             self.request_socket.send(response.SerializeToString())
 
     def _publish_command(self, command):
