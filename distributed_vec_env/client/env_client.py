@@ -53,6 +53,10 @@ class EnvClient(ClientBase):
         """ Perform action in the env and return next frame as Frame protocol buffer. """
         observation, reward, done, info = self.environment.step(action)
 
+        # A very important line
+        if done:
+            observation = self.environment.reset()
+
         return pb.Frame(
             observation=numpy_util.serialize_numpy(observation),
             reward=reward,
