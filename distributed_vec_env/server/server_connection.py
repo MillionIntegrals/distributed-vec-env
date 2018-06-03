@@ -189,7 +189,7 @@ class ServerConnection:
 
         # For now we don't care about infos. That may change
         infos = [{} for _ in range(self.number_of_clients)]
-        result = np.stack(self.observation_buffer, axis=0), self.reward_buffer, self.done_buffer, infos
+        result = np.stack(self.observation_buffer, axis=0), np.stack(self.reward_buffer), np.stack(self.done_buffer), infos
 
         self._reset_frame_buffer()
 
