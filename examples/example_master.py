@@ -1,4 +1,5 @@
 import logging
+import hashlib
 
 from distributed_vec_env import DistributedVecEnv
 from distributed_vec_env import ServerConfiguration
@@ -25,20 +26,27 @@ def main():
 
     print("After reset:")
     print(obs.shape)
+    for i in range(obs.shape[0]):
+        print(f'Digest[{i}]', hashlib.sha256(obs[i].tobytes()).hexdigest())
 
     obs, rews, dones, infos = env.step([0, 0])
 
     print("After first action:")
     print(obs.shape)
+    for i in range(obs.shape[0]):
+        print(f'Digest[{i}]', hashlib.sha256(obs[i].tobytes()).hexdigest())
     print(rews)
     print(dones)
     print(infos)
 
-    while True:
+    # while True:
+    for i in range(10):
         obs, rews, dones, infos = env.step([1, 0])
 
         print("After second action:")
         print(obs.shape)
+        for i in range(obs.shape[0]):
+            print(f'Digest[{i}]', hashlib.sha256(obs[i].tobytes()).hexdigest())
         print(rews)
         print(dones)
         print(infos)
@@ -47,6 +55,8 @@ def main():
 
     print("After third action:")
     print(obs.shape)
+    for i in range(obs.shape[0]):
+        print(f'Digest[{i}]', hashlib.sha256(obs[i].tobytes()).hexdigest())
     print(rews)
     print(dones)
     print(infos)
