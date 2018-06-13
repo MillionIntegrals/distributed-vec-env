@@ -1,7 +1,7 @@
-import zmq
-import logging
 import abc
+import pickle
 import time
+import zmq
 
 import distributed_vec_env.messages.protocol_pb2 as pb
 
@@ -27,7 +27,7 @@ class ClientBase(abc.ABC):
     def __init__(self, configuration: ClientConfiguration):
         self.configuration = configuration
         self.context = zmq.Context()
-        self.logger = logging.getLogger(__name__)
+        self.logger = self.configuration.logger
 
         self.command_socket = self.context.socket(zmq.SUB)
         self.command_socket.setsockopt(zmq.LINGER, self.configuration.linger_period * 1000)
@@ -125,7 +125,8 @@ class ClientBase(abc.ABC):
         if message.command == pb.WorkerCommand.STEP:
             self.logger.info(f"Worker {self.client_id} received command STEP")
             self.command_nonce = message.nonce
-            self._send_frame(self.step_env(message.actions[self.environment_id]), ignore_errors=ignore_errors)
+            actions = pickle.loads(message.actions)
+            self._send_frame(self.step_env(actions[self.environment_id]), ignore_errors=ignore_errors)
             return False
         elif message.command == pb.WorkerCommand.RESET:
             self.logger.info(f"Worker {self.client_id} received command RESET")
@@ -266,4 +267,3 @@ class ClientBase(abc.ABC):
             self.logger.info(f"Worker {self.client_id} timeout - resetting state")
             self.reset_client()
             return None
-

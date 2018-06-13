@@ -46,7 +46,8 @@ class EnvClient(ClientBase):
         return pb.Frame(
             observation=numpy_util.serialize_numpy(observation),
             reward=0.0,
-            done=False
+            done=False,
+            info=pickle.dumps({})
         )
 
     def step_env(self, action):
@@ -60,5 +61,6 @@ class EnvClient(ClientBase):
         return pb.Frame(
             observation=numpy_util.serialize_numpy(observation),
             reward=reward,
-            done=done
+            done=done,
+            info=pickle.dumps(info)
         )

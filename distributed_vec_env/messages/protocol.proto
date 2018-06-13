@@ -31,7 +31,8 @@ message Frame {
     Array observation = 1;
     double reward = 2;
     bool done = 3;
-    int64 nonce = 4;
+    bytes info = 4;
+    int64 nonce = 5;
 }
 
 
@@ -87,5 +88,5 @@ message WorkerCommand {
 
     WorkerCommandEnum command = 1;
     int64 nonce = 2;
-    repeated int32 actions = 3;  // action per client
+    bytes actions = 3;  // action per client
 }

@@ -1,4 +1,3 @@
-import logging
 import numpy as np
 import pickle
 import zmq
@@ -27,7 +26,7 @@ class ServerConnection:
     def __init__(self, configuration: ServerConfiguration):
         self.context = zmq.Context()
         self.configuration = configuration
-        self.logger = logging.getLogger(__name__)
+        self.logger = self.configuration.logger
 
         # Pull socket - workers send work results over this channel
         self.request_socket = self.context.socket(zmq.REP)
@@ -58,6 +57,7 @@ class ServerConnection:
         self.observation_buffer = [None for _ in range(self.number_of_clients)]
         self.reward_buffer = [None for _ in range(self.number_of_clients)]
         self.done_buffer = [None for _ in range(self.number_of_clients)]
+        self.info_buffer = [None for _ in range(self.number_of_clients)]
 
         self.command_nonce = None
         self.last_command = None
@@ -131,10 +131,12 @@ class ServerConnection:
         if self.is_closed:
             raise ServerClosedException("Environment already closed")
 
+        action_bytes = pickle.dumps(actions)
+
         command = pb.WorkerCommand(
             command=pb.WorkerCommand.STEP,
             nonce=numpy_util.random_int64(),
-            actions=actions
+            actions=action_bytes
         )
 
         self._publish_command(command)
@@ -187,9 +189,10 @@ class ServerConnection:
 
         self.last_command = None
 
-        # For now we don't care about infos. That may change
-        infos = [{} for _ in range(self.number_of_clients)]
-        result = np.stack(self.observation_buffer, axis=0), np.stack(self.reward_buffer), np.stack(self.done_buffer), infos
+        result = (
+            np.stack(self.observation_buffer, axis=0), np.stack(self.reward_buffer), np.stack(self.done_buffer),
+            self.info_buffer
+        )
 
         self._reset_frame_buffer()
 
@@ -223,6 +226,7 @@ class ServerConnection:
         self.observation_buffer = [None for _ in range(self.number_of_clients)]
         self.reward_buffer = [None for _ in range(self.number_of_clients)]
         self.done_buffer = [None for _ in range(self.number_of_clients)]
+        self.info_buffer = [None for _ in range(self.number_of_clients)]
 
         self.command_nonce = None
 
@@ -336,7 +340,8 @@ class ServerConnection:
         """ Handle the FRAME request from the client """
         frame = request.frame
 
-        if request.client_id not in self.client_env_map or self.env_client_map[self.client_env_map[request.client_id]] != request.client_id:
+        if (request.client_id not in self.client_env_map) or \
+                (self.env_client_map[self.client_env_map[request.client_id]] != request.client_id):
             self.logger.info(f"Received frame with stale client {request.client_id}")
             self.logger.info(self.client_env_map)
             self.logger.info(self.env_client_map)
@@ -357,6 +362,7 @@ class ServerConnection:
             self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
             self.reward_buffer[environment_id] = frame.reward
             self.done_buffer[environment_id] = frame.done
+            self.info_buffer[environment_id] = pickle.loads(frame.info)
 
             # Just confirm receipt, nothing more
             response = pb.MasterResponse(
