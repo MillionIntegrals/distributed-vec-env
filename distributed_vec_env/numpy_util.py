@@ -28,4 +28,3 @@ def deserialize_numpy(protobuf):
 def random_int64():
     """ Generate a random 64bit integer """
     return np.random.randint(0, MAX_INT64, dtype=np.int64)
-

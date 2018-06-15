@@ -7,6 +7,7 @@ message MasterRequest {
         INITIALIZE = 0;  // Ask server for preliminary information and establish a relationship
         CONNECT = 1;  // Register client at the server for an environment and commit to sending frames
         FRAME = 2;  // Send frame from client to the server
+        HEARTBEAT = 3;  // Worker making request to the master to check if everything is OK
     }
 
     MasterRequestEnum command = 1;
@@ -45,10 +46,12 @@ message Array {
 
 message MasterResponse {
     enum ConfirmationResponseEnum {
-        OK = 0;
-        ERROR = 1;
-        WAIT = 2;
-        SOFT_ERROR = 3;
+        OK = 0; // ALL GOOD
+        ERROR = 1;  // FATALLY WRONG, RESET YOURSELF
+        WAIT = 2;  // SERVER BUSY, KEEP WAITING
+        SOFT_ERROR = 3;  // WRONG BUT CAN RECOVER, CONTINUE
+        RESET = 4;  // UNREGISTER THE ENVIRONMENT BUT STAY IN THE QUEUE
+        OK_ENCOURAGE = 5;  // OK, PLS SEND ME FRAME
     }
 
     ConfirmationResponseEnum response = 1;
@@ -74,19 +77,23 @@ message NameResponse {
     int32 server_version = 3;
     int32 client_id = 4;
     int64 instance_id = 5;
+    bool reset_compensation = 6;
 }
 
 
 message WorkerCommand {
     // Commands set from master to workers
     enum WorkerCommandEnum {
-        NO_COMMAND = 0;
-        STEP = 1;
-        RESET = 2;
-        CLOSE = 3;
+        NO_COMMAND = 0;  // No command, just an empty message
+        STEP = 1;  // Step the environment
+        RESET = 2;  // Reset the environment
+        CLOSE = 3;  // Close the environment
+        WAKE_UP = 4;  // Wake up waiting envs and make them send requests
+        RESET_CLIENT = 5;  // Reset all clients waiting for the commands
     }
 
     WorkerCommandEnum command = 1;
     int64 nonce = 2;
     bytes actions = 3;  // action per client
+    int64 instance_id = 4;
 }

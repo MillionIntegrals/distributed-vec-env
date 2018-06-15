@@ -20,6 +20,7 @@ class ServerClosedException(Exception):
     pass
 
 
+# noinspection PyUnresolvedReferences,PyTypeChecker
 class ServerConnection:
     """ An object encapsulating server network interface """
 
@@ -59,6 +60,7 @@ class ServerConnection:
         self.done_buffer = [None for _ in range(self.number_of_clients)]
         self.info_buffer = [None for _ in range(self.number_of_clients)]
 
+        self.last_command_nonce = np.int64(0)
         self.command_nonce = None
         self.last_command = None
 
@@ -99,6 +101,8 @@ class ServerConnection:
 
         self.logger.info("Master: awaiting initialization")
 
+        self.send_client_reset()
+
         while self.connected_clients < self.number_of_clients:
             self._communication_loop()
 
@@ -114,8 +118,11 @@ class ServerConnection:
 
         command = pb.WorkerCommand(
             command=pb.WorkerCommand.RESET,
-            nonce=numpy_util.random_int64()
+            # nonce=numpy_util.random_int64()
+            nonce=self.last_command_nonce
         )
+
+        self.last_command_nonce += 1
 
         self._publish_command(command)
         self._reset_frame_buffer()
@@ -135,12 +142,25 @@ class ServerConnection:
 
         command = pb.WorkerCommand(
             command=pb.WorkerCommand.STEP,
-            nonce=numpy_util.random_int64(),
+            # nonce=numpy_util.random_int64(),
+            nonce=self.last_command_nonce,
             actions=action_bytes
         )
+        self.last_command_nonce += 1
 
         self._publish_command(command)
         self._reset_frame_buffer()
+
+    def send_client_reset(self):
+        """ Send worker command to reset the environments if they have been already initialized """
+        command = pb.WorkerCommand(
+            command=pb.WorkerCommand.RESET_CLIENT,
+            # nonce=numpy_util.random_int64(),
+            nonce=self.last_command_nonce,
+            instance_id=self.instance_id
+        )
+        self.last_command_nonce += 1
+        self._publish_command(command)
 
     def gather_frames(self):
         """
@@ -162,30 +182,8 @@ class ServerConnection:
 
             # If we're timing out, unregister old environments
             if time.time() - start_time > self.configuration.timeout:
-                unregistered_any = False
-
-                for idx, frame in enumerate(self.observation_buffer):
-                    if frame is None and idx in self.env_client_map:
-                        self._unregister_env(idx)
-                        unregistered_any = True
-
-                        prev_observation = self.prev_observation_buffer[idx]
-
-                        if prev_observation is None:
-                            # No previous observations, just start everything from scratch
-                            self._reset_communication_state()
-                            self._resend_last_command()
-                        else:
-                            self.observation_buffer[idx] = self.prev_observation_buffer[idx]
-
-                            self.done_buffer[idx] = True
-                            self.reward_buffer[idx] = 0.0
-
+                self._communication_timeout()
                 start_time = time.time()
-
-                if not unregistered_any:
-                    self._reset_communication_state()
-                    self._resend_last_command()
 
         self.last_command = None
 
@@ -207,8 +205,11 @@ class ServerConnection:
 
         command = pb.WorkerCommand(
             command=pb.WorkerCommand.CLOSE,
-            nonce=numpy_util.random_int64()
+            # nonce=numpy_util.random_int64()
+            nonce=self.last_command_nonce
+
         )
+        self.last_command_nonce += 1
 
         self._publish_command(command)
 
@@ -229,6 +230,33 @@ class ServerConnection:
         self.info_buffer = [None for _ in range(self.number_of_clients)]
 
         self.command_nonce = None
+
+    def _communication_timeout(self):
+        """ Decision loop triggered when some of the workers didn't submit the data on time """
+        unregistered_any = False
+
+        for idx, frame in enumerate(self.observation_buffer):
+            if frame is None and idx in self.env_client_map:
+                self._unregister_env(idx)
+                unregistered_any = True
+
+                prev_observation = self.prev_observation_buffer[idx]
+
+                if prev_observation is None:
+                    # No previous observations, just start everything from scratch
+                    self._reset_communication_state()
+                    self._resend_last_command()
+                else:
+                    # Add last observation with done marker and zero reward
+                    self.observation_buffer[idx] = self.prev_observation_buffer[idx]
+
+                    self.done_buffer[idx] = True
+                    self.reward_buffer[idx] = 0.0
+
+        if not unregistered_any:
+            # Just not enough envs, is this the correct way to handle it? I'm not sure
+            self._reset_communication_state()
+            self._resend_last_command()
 
     def _resend_last_command(self):
         """ Send again last command """
@@ -257,6 +285,8 @@ class ServerConnection:
                     self._handle_connect_request(request)
                 elif request.command == pb.MasterRequest.FRAME:
                     self._handle_frame_request(request)
+                elif request.command == pb.MasterRequest.HEARTBEAT:
+                    self._handle_heartbeat_request(request)
                 else:
                     raise ServerHandlerException(f"Received unknown request: {request}")
 
@@ -269,7 +299,8 @@ class ServerConnection:
                 seed=self.last_client_id_assigned,
                 server_version=self.configuration.server_version,
                 client_id=self.last_client_id_assigned,
-                instance_id=self.instance_id
+                instance_id=self.instance_id,
+                reset_compensation=self.configuration.reset_compensation
             )
         )
 
@@ -291,7 +322,8 @@ class ServerConnection:
 
             if self.last_command is not None:
                 response = pb.MasterResponse(
-                    response=pb.MasterResponse.OK,
+                    # Encourage the client to send a reset frame straight away
+                    response=pb.MasterResponse.OK_ENCOURAGE,
                     connect_response=pb.ConnectResponse(
                         environment_id=new_environment_id,
                         last_command=self.last_command
@@ -305,7 +337,7 @@ class ServerConnection:
                     )
                 )
 
-            self.logger.info(f"Master: assigned client id {request.client_id} to environment {new_environment_id}")
+            self.logger.info(f"Master: assigned client id c{request.client_id} to environment e{new_environment_id}")
             self.logger.info(f"Client env map: {self.client_env_map}")
 
             self.client_env_map[request.client_id] = new_environment_id
@@ -317,6 +349,11 @@ class ServerConnection:
             response = pb.MasterResponse(response=pb.MasterResponse.WAIT)
             self.request_socket.send(response.SerializeToString())
 
+    def _handle_heartbeat_request(self, _):
+        """ Respond to the client that the server is alive """
+        response = pb.MasterResponse(response=pb.MasterResponse.OK)
+        self.request_socket.send(response.SerializeToString())
+
     def _map_new_env(self, client_id):
         """ Map client to a free environment slot """
         for i in range(self.number_of_clients):
@@ -325,13 +362,13 @@ class ServerConnection:
                 self.client_env_map[client_id] = i
                 return i
 
-        return None
+        raise RuntimeError("Cannot map environment, all are busy!")
 
     def _unregister_env(self, env_id):
         """ Map client to a free environment slot """
         if env_id in self.env_client_map:
-            self.logger.info(f"Unregistering stale environment {env_id}")
             client_id = self.env_client_map[env_id]
+            self.logger.info(f"Unregistering environment c{client_id}/e{env_id}")
 
             del self.env_client_map[env_id]
             del self.client_env_map[client_id]
@@ -342,36 +379,62 @@ class ServerConnection:
 
         if (request.client_id not in self.client_env_map) or \
                 (self.env_client_map[self.client_env_map[request.client_id]] != request.client_id):
-            self.logger.info(f"Received frame with stale client {request.client_id}")
-            self.logger.info(self.client_env_map)
-            self.logger.info(self.env_client_map)
+            self.logger.info(f"Received frame with stale client c{request.client_id}")
+            # self.logger.info(self.client_env_map)
+            # self.logger.info(self.env_client_map)
 
             response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
             self.request_socket.send(response.SerializeToString())
         elif frame.nonce != self.command_nonce:
-            self.logger.info(f"Received frame with incorrect nonce")
+            self.logger.info(
+                f"Received frame with incorrect nonce from client c{request.client_id} ({frame.nonce, self.command_nonce})"
+            )
             # Notify client of an error request
             response = pb.MasterResponse(response=pb.MasterResponse.SOFT_ERROR)
             self.request_socket.send(response.SerializeToString())
-
         else:
+            # CORRECT FRAME RECEIVED
             environment_id = self.client_env_map[request.client_id]
 
-            self.logger.info(f"Received frame with correct nonce from {request.client_id}/{environment_id}")
+            self.logger.info(f"Received frame with correct nonce from c{request.client_id}/e{environment_id}")
 
             self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
             self.reward_buffer[environment_id] = frame.reward
             self.done_buffer[environment_id] = frame.done
             self.info_buffer[environment_id] = pickle.loads(frame.info)
 
-            # Just confirm receipt, nothing more
-            response = pb.MasterResponse(
-                response=pb.MasterResponse.OK
-            )
-            self.request_socket.send(response.SerializeToString())
+            if frame.done and self.configuration.reset_compensation:
+                # Reset compensation, unregister the resetting environment
+                self.logger.info(f"Reset compensation: unregistering env c{request.client_id}/e{environment_id}")
+                self._unregister_env(environment_id)
 
-    def _publish_command(self, command):
+                response = pb.MasterResponse(
+                    response=pb.MasterResponse.RESET
+                )
+                self.request_socket.send(response.SerializeToString())
+
+                self._send_wake_up_call()
+            else:
+                # Just confirm receipt, nothing more
+                response = pb.MasterResponse(
+                    response=pb.MasterResponse.OK
+                )
+                self.request_socket.send(response.SerializeToString())
+
+    def _send_wake_up_call(self):
+        """ Send a WAKE_UP message to all the clients """
+        command = pb.WorkerCommand(
+            command=pb.WorkerCommand.WAKE_UP,
+            # nonce=numpy_util.random_int64(),
+            # nonce=self.last_command_nonce
+        )
+        # self.last_command_nonce += 1
+        self._publish_command(command, remember=False)
+
+    def _publish_command(self, command, remember=True):
         """ Send a command to all the clients """
-        self.command_nonce = command.nonce
-        self.last_command = command
+        if remember:
+            self.command_nonce = command.nonce
+            self.last_command = command
+
         self.command_socket.send(command.SerializeToString())

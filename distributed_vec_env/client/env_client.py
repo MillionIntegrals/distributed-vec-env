@@ -38,6 +38,7 @@ class EnvClient(ClientBase):
         """ Close the environment and free the resources """
         if self.environment is not None:
             self.environment.close()
+            self.environment = None
 
     def reset_env(self):
         """ Reset the environment and return next frame as Frame protocol buffer """
@@ -55,12 +56,28 @@ class EnvClient(ClientBase):
         observation, reward, done, info = self.environment.step(action)
 
         # A very important line
-        if done:
-            observation = self.environment.reset()
+        if done and not self.reset_compensation:
+            reset_frame = self._perform_reset()
 
-        return pb.Frame(
-            observation=numpy_util.serialize_numpy(observation),
-            reward=reward,
-            done=done,
-            info=pickle.dumps(info)
-        )
+            return pb.Frame(
+                observation=reset_frame.observation,
+                reward=reward,
+                done=done,
+                info=pickle.dumps(info)
+            )
+        else:
+            return pb.Frame(
+                observation=numpy_util.serialize_numpy(observation),
+                reward=reward,
+                done=done,
+                info=pickle.dumps(info)
+            )
+
+    def post_reset_actions(self, frame_buffer):
+        """ Make any actions to the environment after the response has been sent """
+        pass
+
+    def post_step_actions(self, frame_buffer):
+        """ Make any actions to the environment after the response has been sent """
+        if frame_buffer.done and self.reset_compensation:
+            self._perform_reset()
