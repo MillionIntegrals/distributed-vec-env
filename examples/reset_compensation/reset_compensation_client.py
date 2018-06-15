@@ -25,7 +25,7 @@ class DeepMindEnv(EnvClient):
     def reset_env(self):
         """ Reset the environment and return next frame as Frame protocol buffer """
         observation = self.environment.reset()
-        time.sleep(10)  # SLEEP ON RESET
+        time.sleep(CLIENT_RESET_SLEEP)  # SLEEP ON RESET
 
         return pb.Frame(
             observation=numpy_util.serialize_numpy(observation),
