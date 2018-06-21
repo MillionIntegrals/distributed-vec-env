@@ -121,12 +121,14 @@ class ClientBase(abc.ABC):
     def _perform_reset(self) -> pb.Frame:
         """ Wrap reset in a small helper utility """
         if not self.was_just_reset:
-            self.logger.info(f"Worker {self.client_id}: Performing real reset of the environment")
+            if self.configuration.verbosity > 2:
+                self.logger.info(f"Worker {self.client_id}: Performing real reset of the environment")
             self.was_just_reset = True
             self.reset_frame = self.reset_env()
             return self.reset_frame
         else:
-            self.logger.info(f"Worker {self.client_id}: Fake reset compensated")
+            if self.configuration.verbosity > 2:
+                self.logger.info(f"Worker {self.client_id}: Fake reset compensated")
             return self.reset_frame
 
     def _perform_step(self, action) -> pb.Frame:
@@ -139,7 +141,8 @@ class ClientBase(abc.ABC):
     def init(self):
         """ Perform the initial handshake dance between the client and server to register for a mutual cooperation """
         if self.client_id is None:
-            self.logger.info(f"Worker uninitialized: waiting for environment name")
+            if self.configuration.verbosity > 0:
+                self.logger.info(f"Worker uninitialized: waiting for environment name")
 
             if not self._send_initialize_request():
                 return
@@ -158,12 +161,14 @@ class ClientBase(abc.ABC):
                 self.is_idle = False
                 self.idle_timestamp = None
         else:
-            self.logger.info(f"Worker {self.client_id}: waiting for registration")
+            if self.configuration.verbosity > 0:
+                self.logger.info(f"Worker {self.client_id}: waiting for registration")
 
             if not self._send_connect_request(self.env_space_payload()):
                 return
 
-            self.logger.info(f"Worker {self.client_id}/{self.environment_id}: properly initialized")
+            if self.configuration.verbosity > 0:
+                self.logger.info(f"Worker {self.client_id}/{self.environment_id}: properly initialized")
 
             self._perform_reset()
             self.is_initialized = True
@@ -171,11 +176,14 @@ class ClientBase(abc.ABC):
     def run_command(self, message) -> bool:
         """ Respond to a command received from the server """
         if message.nonce < self.command_nonce:
-            self.logger.info(f"Worker {self.client_id} ignoring command with stale nonce {message.nonce}/{self.command_nonce}")
+            if self.configuration.verbosity > 2:
+                self.logger.info(f"Worker {self.client_id} ignoring command with stale nonce {message.nonce}/{self.command_nonce}")
             return False
 
         if message.command == pb.WorkerCommand.STEP:
-            self.logger.info(f"Worker {self.client_id} received command STEP")
+            if self.configuration.verbosity > 3:
+                self.logger.info(f"Worker {self.client_id} received command STEP")
+
             self.command_nonce = message.nonce
             actions = pickle.loads(message.actions)
 
@@ -254,7 +262,8 @@ class ClientBase(abc.ABC):
                             f"{self.configuration.server_version}"
                         )
 
-                    self.logger.info(f"Initialization received: client id {name_response.client_id}")
+                    if self.configuration.verbosity > 1:
+                        self.logger.info(f"Initialization received: client id {name_response.client_id}")
                     self.environment_name = name_response.name
                     self.environment_seed = name_response.seed
                     self.client_id = name_response.client_id
@@ -291,17 +300,20 @@ class ClientBase(abc.ABC):
                 response.ParseFromString(self.request_socket.recv())
 
                 if response.response == pb.MasterResponse.OK:
-                    self.logger.info(f"Worker {self.client_id} CONNECT - OK")
+                    if self.configuration.verbosity > 2:
+                        self.logger.info(f"Worker {self.client_id} CONNECT - OK")
                     self.environment_id = response.connect_response.environment_id
                     self.command_nonce = 0
                     return True
                 if response.response == pb.MasterResponse.OK_ENCOURAGE:
-                    self.logger.info(f"Worker {self.client_id} CONNECT - OK ENCOURAGE")
+                    if self.configuration.verbosity > 2:
+                        self.logger.info(f"Worker {self.client_id} CONNECT - OK ENCOURAGE")
                     self.environment_id = response.connect_response.environment_id
                     self.command_nonce = response.connect_response.last_command.nonce
                     return self._send_frame(self._perform_reset())
                 elif response.response == pb.MasterResponse.WAIT:
-                    self.logger.info(f"Worker {self.client_id} received wait command - server is busy")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info(f"Worker {self.client_id} received wait command - server is busy")
 
                     self.is_idle = True
                     self.idle_timestamp = time.time()
@@ -322,7 +334,9 @@ class ClientBase(abc.ABC):
         try:
             poll_status = dict(self.request_poller.poll(self.configuration.timeout * 1000))
 
-            self.logger.info(f"Worker {self.client_id} sending frame..")
+            if self.configuration.verbosity > 3:
+                self.logger.info(f"Worker {self.client_id} sending frame..")
+
             frame.nonce = self.command_nonce
 
             if self.request_socket in poll_status and poll_status[self.request_socket] == zmq.POLLOUT:
@@ -342,27 +356,33 @@ class ClientBase(abc.ABC):
                     response.ParseFromString(self.request_socket.recv())
 
                     if response.response == pb.MasterResponse.OK:
-                        self.logger.info("Frame OK Response")
+                        if self.configuration.verbosity > 3:
+                            self.logger.info("Frame OK Response")
                         return True
                     if response.response == pb.MasterResponse.RESET:
-                        self.logger.info("Frame RESET Response")
+                        if self.configuration.verbosity > 3:
+                            self.logger.info("Frame RESET Response")
                         self.is_initialized = False
                         self.environment_id = None
                         self.is_idle = None
                         return False
                     if response.response == pb.MasterResponse.SOFT_ERROR:
-                        self.logger.info("Frame SOFT_ERROR Response")
+                        if self.configuration.verbosity > 3:
+                            self.logger.info("Frame SOFT_ERROR Response")
                         return True
                     else:
-                        self.logger.info("Frame UNKNOWN Response: {}".format(response))
+                        if self.configuration.verbosity > 3:
+                            self.logger.info("Frame UNKNOWN Response: {}".format(response))
                         self.reset_client()
                         return False
                 else:
-                    self.logger.info("Frame response timeout receive")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame response timeout receive")
                     self.reset_client()
                     return False
             else:
-                self.logger.info("Frame response timeout send")
+                if self.configuration.verbosity > 3:
+                    self.logger.info("Frame response timeout send")
                 self.reset_client()
                 return False
         except zmq.Again:
@@ -374,7 +394,8 @@ class ClientBase(abc.ABC):
         try:
             poll_status = dict(self.request_poller.poll(self.configuration.timeout * 1000))
 
-            self.logger.info(f"Worker {self.client_id} sending heartbeat..")
+            if self.configuration.verbosity > 3:
+                self.logger.info(f"Worker {self.client_id} sending heartbeat..")
 
             if self.request_socket in poll_status and poll_status[self.request_socket] == zmq.POLLOUT:
                 request = pb.MasterRequest(
@@ -389,23 +410,28 @@ class ClientBase(abc.ABC):
                 response.ParseFromString(self.request_socket.recv())
 
                 if response.response == pb.MasterResponse.OK:
-                    self.logger.info("Frame OK Response")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame OK Response")
                     return True
                 if response.response == pb.MasterResponse.RESET:
-                    self.logger.info("Frame RESET Response")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame RESET Response")
                     self.is_initialized = False
                     self.environment_id = None
                     self.is_idle = None
                     return False
                 if response.response == pb.MasterResponse.SOFT_ERROR:
-                    self.logger.info("Frame SOFT_ERROR Response")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame SOFT_ERROR Response")
                     return True
                 if response.response == pb.MasterResponse.ERROR:
-                    self.logger.info("Frame ERROR Response")
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame ERROR Response")
                     self.reset_client()
                     return False
                 else:
-                    self.logger.info("Frame UNKNOWN Response: {}".format(response))
+                    if self.configuration.verbosity > 3:
+                        self.logger.info("Frame UNKNOWN Response: {}".format(response))
                     self.reset_client()
                     return False
             else:
@@ -420,19 +446,22 @@ class ClientBase(abc.ABC):
         """ Wait for command from the server """
         poll_status = self.command_poller.poll(self.configuration.timeout * 1000)
 
-        self.logger.info(f"Worker {self.client_id} polling for commands[idle={self.is_idle}]..")
+        if self.configuration.verbosity > 2:
+            self.logger.info(f"Worker {self.client_id} polling for commands[idle={self.is_idle}]..")
 
         if poll_status:
             self.unsuccessful_poll_count = 0
             message = pb.WorkerCommand()
             message.ParseFromString(self.command_socket.recv())
-            self.logger.info("Received command {}".format(message.command))
+            if self.configuration.verbosity > 3:
+                self.logger.info("Received command {}".format(message.command))
             return message
         else:
             self.unsuccessful_poll_count += 1
 
             if self.unsuccessful_poll_count >= self.configuration.polling_limit:
-                self.logger.info("Polling refresh")
+                if self.configuration.verbosity > 2:
+                    self.logger.info("Polling refresh")
                 self._command_socket_refresh()
 
             return None
@@ -441,13 +470,15 @@ class ClientBase(abc.ABC):
         """ Wait for command from the server """
         poll_status = self.command_poller.poll(0)
 
-        self.logger.info(f"Worker {self.client_id} FAST polling for commands[idle={self.is_idle}]..")
+        if self.configuration.verbosity > 2:
+            self.logger.info(f"Worker {self.client_id} FAST polling for commands[idle={self.is_idle}]..")
 
         if poll_status:
             self.unsuccessful_poll_count = 0
             message = pb.WorkerCommand()
             message.ParseFromString(self.command_socket.recv())
-            self.logger.info("Received command {}".format(message.command))
+            if self.configuration.verbosity > 3:
+                self.logger.info("Received command {}".format(message.command))
             return message
         else:
             return None

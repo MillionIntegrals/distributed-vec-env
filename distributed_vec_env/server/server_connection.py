@@ -99,7 +99,8 @@ class ServerConnection:
         if self.is_closed:
             raise ServerClosedException("Environment already closed")
 
-        self.logger.info("Master: awaiting initialization")
+        if self.configuration.verbosity > 0:
+            self.logger.info("Master: awaiting initialization")
 
         self.send_client_reset()
 
@@ -265,7 +266,8 @@ class ServerConnection:
             )
         )
 
-        self.logger.info(f"Master: assigned client id {self.last_client_id_assigned}")
+        if self.configuration.verbosity > 0:
+            self.logger.info(f"Master: assigned client id {self.last_client_id_assigned}")
 
         # Client ids are monotonically increasing
         self.last_client_id_assigned += 1
@@ -298,8 +300,11 @@ class ServerConnection:
                     )
                 )
 
-            self.logger.info(f"Master: assigned client id c{request.client_id} to environment e{new_environment_id}")
-            self.logger.info(f"Client env map: {self.client_env_map}")
+            if self.configuration.verbosity > 1:
+                self.logger.info(f"Master: assigned client id c{request.client_id} to environment e{new_environment_id}")
+
+            if self.configuration.verbosity > 2:
+                self.logger.info(f"Client env map: {self.client_env_map}")
 
             self.client_env_map[request.client_id] = new_environment_id
             self.env_client_map[new_environment_id] = request.client_id
@@ -329,7 +334,8 @@ class ServerConnection:
         """ Map client to a free environment slot """
         if env_id in self.env_client_map:
             client_id = self.env_client_map[env_id]
-            self.logger.info(f"Unregistering environment c{client_id}/e{env_id}")
+            if self.configuration.verbosity > 1:
+                self.logger.info(f"Unregistering environment c{client_id}/e{env_id}")
 
             del self.env_client_map[env_id]
             del self.client_env_map[client_id]
@@ -340,14 +346,16 @@ class ServerConnection:
 
         if (request.client_id not in self.client_env_map) or \
                 (self.env_client_map[self.client_env_map[request.client_id]] != request.client_id):
-            self.logger.info(f"Received frame with stale client c{request.client_id}")
+            if self.configuration.verbosity > 3:
+                self.logger.info(f"Received frame with stale client c{request.client_id}")
 
             response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
             self.request_socket.send(response.SerializeToString())
         elif frame.nonce != self.command_nonce:
-            self.logger.info(
-                f"Received frame with incorrect nonce from client c{request.client_id} ({frame.nonce, self.command_nonce})"
-            )
+            if self.configuration.verbosity > 2:
+                self.logger.info(
+                    f"Received frame with incorrect nonce from client c{request.client_id} ({frame.nonce, self.command_nonce})"
+                )
             # Notify client of an error request
             response = pb.MasterResponse(response=pb.MasterResponse.SOFT_ERROR)
             self.request_socket.send(response.SerializeToString())
@@ -355,7 +363,8 @@ class ServerConnection:
             # CORRECT FRAME RECEIVED
             environment_id = self.client_env_map[request.client_id]
 
-            self.logger.info(f"Received frame with correct nonce from c{request.client_id}/e{environment_id}")
+            if self.configuration.verbosity > 3:
+                self.logger.info(f"Received frame with correct nonce from c{request.client_id}/e{environment_id}")
 
             self.observation_buffer[environment_id] = numpy_util.deserialize_numpy(frame.observation)
             self.reward_buffer[environment_id] = frame.reward
@@ -364,7 +373,9 @@ class ServerConnection:
 
             if frame.done and self.configuration.reset_compensation:
                 # Reset compensation, unregister the resetting environment
-                self.logger.info(f"Reset compensation: unregistering env c{request.client_id}/e{environment_id}")
+                if self.configuration.verbosity > 2:
+                    self.logger.info(f"Reset compensation: unregistering env c{request.client_id}/e{environment_id}")
+
                 self._unregister_env(environment_id)
 
                 response = pb.MasterResponse(

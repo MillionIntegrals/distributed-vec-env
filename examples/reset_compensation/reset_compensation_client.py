@@ -45,7 +45,8 @@ def main():
         server_version=1,
         timeout=5,
         wait_period=1,
-        polling_limit=5
+        polling_limit=5,
+        verbosity=2
     )
 
     client = DeepMindEnv(configuration)
