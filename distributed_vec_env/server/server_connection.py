@@ -341,8 +341,6 @@ class ServerConnection:
         if (request.client_id not in self.client_env_map) or \
                 (self.env_client_map[self.client_env_map[request.client_id]] != request.client_id):
             self.logger.info(f"Received frame with stale client c{request.client_id}")
-            # self.logger.info(self.client_env_map)
-            # self.logger.info(self.env_client_map)
 
             response = pb.MasterResponse(response=pb.MasterResponse.ERROR)
             self.request_socket.send(response.SerializeToString())
