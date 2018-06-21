@@ -218,50 +218,11 @@ class ServerConnection:
 
     ####################################################################################################################
     # Communication bits
-    def _reset_communication_state(self):
-        """ Reset client-server state """
-        self.client_env_map = {}
-        self.env_client_map = {}
-
-        self.prev_observation_buffer = [None for _ in range(self.number_of_clients)]
-        self.observation_buffer = [None for _ in range(self.number_of_clients)]
-        self.reward_buffer = [None for _ in range(self.number_of_clients)]
-        self.done_buffer = [None for _ in range(self.number_of_clients)]
-        self.info_buffer = [None for _ in range(self.number_of_clients)]
-
-        self.command_nonce = None
-
     def _communication_timeout(self):
         """ Decision loop triggered when some of the workers didn't submit the data on time """
-        unregistered_any = False
-
         for idx, frame in enumerate(self.observation_buffer):
             if frame is None and idx in self.env_client_map:
                 self._unregister_env(idx)
-                unregistered_any = True
-
-                prev_observation = self.prev_observation_buffer[idx]
-
-                if prev_observation is None:
-                    # No previous observations, just start everything from scratch
-                    self._reset_communication_state()
-                    self._resend_last_command()
-                else:
-                    # Add last observation with done marker and zero reward
-                    self.observation_buffer[idx] = self.prev_observation_buffer[idx]
-
-                    self.done_buffer[idx] = True
-                    self.reward_buffer[idx] = 0.0
-
-        if not unregistered_any:
-            # Just not enough envs, is this the correct way to handle it? I'm not sure
-            self._reset_communication_state()
-            self._resend_last_command()
-
-    def _resend_last_command(self):
-        """ Send again last command """
-        self.last_command.nonce = numpy_util.random_int64()
-        self._publish_command(self.last_command)
 
     def _communication_loop(self):
         """
